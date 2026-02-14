@@ -18,9 +18,9 @@ MYSQL_CONFIG = {
 }
 
 # Path Configuration
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'backup_data')
-SCHEMA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'schema.sql')
+SCHEMA_FILE = os.path.join(BASE_DIR, 'schema.sql')
 
 # Migration Settings
 BATCH_SIZE = 1000  # Number of records to insert at once

@@ -6,6 +6,10 @@ Tool untuk migrasi data dari MongoDB ke MySQL untuk project Snaplove.
 
 ```
 migration/
+├── backup_data/        # Data JSON dari MongoDB (IGNORED by git)
+│   ├── test.users.json
+│   ├── test.frames.json
+│   └── ...
 ├── config.example.py   # Template konfigurasi (copy ke config.py)
 ├── config.py           # Konfigurasi database dan path (IGNORED by git)
 ├── converter.py        # Script utama untuk konversi
@@ -22,7 +26,7 @@ migration/
 
 1. **Python 3.7+** terinstall
 2. **MySQL Server** sudah berjalan
-3. **Data JSON** dari MongoDB sudah di-export ke folder `backup_data/`
+3. **Data JSON** dari MongoDB sudah di-export ke folder `migration/backup_data/`
 
 ## Instalasi
 
@@ -69,14 +73,18 @@ MYSQL_CONFIG = {
 Export semua collection dari MongoDB ke format JSON:
 
 ```bash
-# Contoh menggunakan mongoexport
+# Buat folder backup_data di dalam migration
+cd migration
+mkdir backup_data
+
+# Export semua collection ke folder backup_data
 mongoexport --db=test --collection=users --out=backup_data/test.users.json --jsonArray
 mongoexport --db=test --collection=frames --out=backup_data/test.frames.json --jsonArray
 mongoexport --db=test --collection=photos --out=backup_data/test.photos.json --jsonArray
 # ... dan seterusnya untuk collection lainnya
 ```
 
-Atau jika sudah ada di folder `backup_data/`, pastikan file-file berikut ada:
+Atau jika sudah ada, pastikan file-file berikut ada di folder `migration/backup_data/`:
 - `test.users.json`
 - `test.maintenances.json`
 - `test.follows.json`
@@ -171,8 +179,9 @@ MongoDB to MySQL Migration Tool
 - Pastikan database kosong sebelum menjalankan migration
 
 ### Error: "File not found"
-- Pastikan semua file JSON ada di folder `backup_data/`
+- Pastikan semua file JSON ada di folder `migration/backup_data/`
 - Periksa nama file di `config.py` bagian `DATA_FILES`
+- Pastikan folder `backup_data` sudah dibuat di dalam folder `migration`
 
 ### Data tidak lengkap
 - Periksa file JSON apakah formatnya benar (JSON Array)
@@ -223,16 +232,17 @@ def migrate_new_collection(self, data: List[Dict]) -> bool:
 
 File `.gitignore` sudah dikonfigurasi untuk mengabaikan:
 - `config.py` - File konfigurasi dengan password database
+- `backup_data/` - Folder berisi data JSON dari MongoDB (data sensitif)
 - `__pycache__/` dan `*.pyc` - Python cache files
 - `venv/` - Virtual environment folder
 - Log files dan temporary files
 
 ### Best Practices
 
-1. **JANGAN** commit file `config.py` ke repository
+1. **JANGAN** commit file `config.py` dan folder `backup_data/` ke repository
 2. **GUNAKAN** `config.example.py` sebagai template untuk tim
-3. **SHARE** password database melalui channel aman (bukan git)
-4. Setiap developer buat `config.py` sendiri dari template
+3. **SHARE** password database dan data backup melalui channel aman (bukan git)
+4. Setiap developer buat `config.py` sendiri dan export data sendiri dari MongoDB
 
 ### Setup untuk Developer Baru
 
@@ -240,6 +250,13 @@ File `.gitignore` sudah dikonfigurasi untuk mengabaikan:
 # Clone repository
 git clone <repository-url>
 cd migration
+
+# Buat folder untuk data
+mkdir backup_data
+
+# Export data dari MongoDB (lihat Langkah 1)
+# mongoexport --db=test --collection=users --out=backup_data/test.users.json --jsonArray
+# ... export collection lainnya
 
 # Copy template konfigurasi
 cp config.example.py config.py

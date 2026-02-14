@@ -36,6 +36,10 @@ env/
 # Configuration (contains sensitive data)
 config.py
 
+# Data files (contains sensitive MongoDB exports)
+backup_data/*.json
+backup_data/*.bak
+
 # Logs
 *.log
 
