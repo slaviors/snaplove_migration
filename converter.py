@@ -25,6 +25,10 @@ class MongoToMySQLConverter:
             'failed': 0,
             'by_collection': {}
         }
+        # Track successfully inserted IDs for foreign key validation
+        self.inserted_user_ids = set()
+        self.inserted_frame_ids = set()
+        self.inserted_photo_ids = set()
     
     def connect(self):
         """Establish MySQL connection"""
@@ -167,6 +171,7 @@ class MongoToMySQLConverter:
                     sql = f"INSERT INTO users ({columns}) VALUES ({placeholders})"
                     
                     cursor.execute(sql, list(user_data.values()))
+                    self.inserted_user_ids.add(user_data['id'])  # Track inserted user ID
                     successful += 1
                     
                 except Exception as e:
@@ -238,10 +243,26 @@ class MongoToMySQLConverter:
         try:
             for record in data:
                 try:
+                    follower_id = self.convert_mongo_id(record.get('follower_id'))
+                    following_id = self.convert_mongo_id(record.get('following_id'))
+                    
+                    # Validate foreign keys
+                    if follower_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped follow: follower_id {follower_id} not found")
+                        continue
+                    
+                    if following_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped follow: following_id {following_id} not found")
+                        continue
+                    
                     follow_data = {
                         'id': self.convert_mongo_id(record.get('_id')),
-                        'follower_id': self.convert_mongo_id(record.get('follower_id')),
-                        'following_id': self.convert_mongo_id(record.get('following_id')),
+                        'follower_id': follower_id,
+                        'following_id': following_id,
                         'status': record.get('status', 'active'),
                         'created_at': self.convert_date(record.get('created_at')),
                         'updated_at': self.convert_date(record.get('updated_at')),
@@ -281,6 +302,14 @@ class MongoToMySQLConverter:
             for record in data:
                 try:
                     frame_id = self.convert_mongo_id(record.get('_id'))
+                    user_id = self.convert_mongo_id(record.get('user_id'))
+                    
+                    # Validate user_id foreign key
+                    if user_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped frame {record.get('title')}: user_id {user_id} not found")
+                        continue
                     
                     # Insert main frame record
                     frame_data = {
@@ -295,7 +324,7 @@ class MongoToMySQLConverter:
                         'approved_by': self.convert_mongo_id(record.get('approved_by')),
                         'approved_at': self.convert_date(record.get('approved_at')),
                         'rejection_reason': record.get('rejection_reason'),
-                        'user_id': self.convert_mongo_id(record.get('user_id')),
+                        'user_id': user_id,
                         'created_at': self.convert_date(record.get('created_at')),
                         'updated_at': self.convert_date(record.get('updated_at')),
                     }
@@ -304,6 +333,7 @@ class MongoToMySQLConverter:
                     columns = ', '.join(f'`{k}`' for k in frame_data.keys())
                     sql = f"INSERT INTO frames ({columns}) VALUES ({placeholders})"
                     cursor.execute(sql, list(frame_data.values()))
+                    self.inserted_frame_ids.add(frame_id)  # Track inserted frame ID
                     
                     # Insert frame images
                     images = record.get('images', [])
@@ -321,23 +351,27 @@ class MongoToMySQLConverter:
                             (frame_id, tag)
                         )
                     
-                    # Insert frame likes
+                    # Insert frame likes (only if user exists)
                     likes = record.get('like_count', [])
                     for like in likes:
-                        cursor.execute(
-                            "INSERT INTO frame_likes (frame_id, user_id, created_at) VALUES (%s, %s, %s)",
-                            (frame_id, self.convert_mongo_id(like.get('user_id')), 
+                        like_user_id = self.convert_mongo_id(like.get('user_id'))
+                        if like_user_id in self.inserted_user_ids:
+                            cursor.execute(
+                                "INSERT INTO frame_likes (frame_id, user_id, created_at) VALUES (%s, %s, %s)",
+                                (frame_id, like_user_id, 
                              self.convert_date(like.get('created_at')))
                         )
                     
-                    # Insert frame uses
+                    # Insert frame uses (only if user exists)
                     uses = record.get('use_count', [])
                     for use in uses:
-                        cursor.execute(
-                            "INSERT INTO frame_uses (frame_id, user_id, created_at) VALUES (%s, %s, %s)",
-                            (frame_id, self.convert_mongo_id(use.get('user_id')), 
-                             self.convert_date(use.get('created_at')))
-                        )
+                        use_user_id = self.convert_mongo_id(use.get('user_id'))
+                        if use_user_id in self.inserted_user_ids:
+                            cursor.execute(
+                                "INSERT INTO frame_uses (frame_id, user_id, created_at) VALUES (%s, %s, %s)",
+                                (frame_id, use_user_id, 
+                                 self.convert_date(use.get('created_at')))
+                            )
                     
                     successful += 1
                     
@@ -424,12 +458,28 @@ class MongoToMySQLConverter:
         try:
             for record in data:
                 try:
+                    frame_id = self.convert_mongo_id(record.get('frame_id'))
+                    user_id = self.convert_mongo_id(record.get('user_id'))
+                    
+                    # Validate foreign keys
+                    if frame_id not in self.inserted_frame_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped report: frame_id {frame_id} not found")
+                        continue
+                    
+                    if user_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped report: user_id {user_id} not found")
+                        continue
+                    
                     report_data = {
                         'id': self.convert_mongo_id(record.get('_id')),
                         'title': record.get('title'),
                         'description': record.get('description'),
-                        'frame_id': self.convert_mongo_id(record.get('frame_id')),
-                        'user_id': self.convert_mongo_id(record.get('user_id')),
+                        'frame_id': frame_id,
+                        'user_id': user_id,
                         'report_status': record.get('report_status', 'pending'),
                         'admin_response': record.get('admin_response'),
                         'admin_id': self.convert_mongo_id(record.get('admin_id')),
@@ -471,13 +521,28 @@ class MongoToMySQLConverter:
             for record in data:
                 try:
                     photo_id = self.convert_mongo_id(record.get('_id'))
+                    frame_id = self.convert_mongo_id(record.get('frame_id'))
+                    user_id = self.convert_mongo_id(record.get('user_id'))
+                    
+                    # Validate foreign keys
+                    if frame_id not in self.inserted_frame_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped photo: frame_id {frame_id} not found")
+                        continue
+                    
+                    if user_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped photo: user_id {user_id} not found")
+                        continue
                     
                     photo_data = {
                         'id': photo_id,
                         'title': record.get('title'),
                         'desc': record.get('desc', ''),
-                        'frame_id': self.convert_mongo_id(record.get('frame_id')),
-                        'user_id': self.convert_mongo_id(record.get('user_id')),
+                        'frame_id': frame_id,
+                        'user_id': user_id,
                         'expires_at': self.convert_date(record.get('expires_at')),
                         'live_photo': record.get('livePhoto', False),
                         'ai_photo': record.get('aiPhoto', False),
@@ -489,6 +554,7 @@ class MongoToMySQLConverter:
                     columns = ', '.join(f'`{k}`' for k in photo_data.keys())
                     sql = f"INSERT INTO photos ({columns}) VALUES ({placeholders})"
                     cursor.execute(sql, list(photo_data.values()))
+                    self.inserted_photo_ids.add(photo_id)  # Track inserted photo ID
                     
                     # Insert photo images
                     images = record.get('images', [])
@@ -627,9 +693,18 @@ class MongoToMySQLConverter:
         try:
             for record in data:
                 try:
+                    user_id = self.convert_mongo_id(record.get('user_id'))
+                    
+                    # Validate foreign key
+                    if user_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped AI usage: user_id {user_id} not found")
+                        continue
+                    
                     usage_data = {
                         'id': self.convert_mongo_id(record.get('_id')),
-                        'user_id': self.convert_mongo_id(record.get('user_id')),
+                        'user_id': user_id,
                         'username': record.get('username'),
                         'count': record.get('count', 0),
                         'month': record.get('month'),
@@ -751,12 +826,28 @@ class MongoToMySQLConverter:
         try:
             for record in data:
                 try:
+                    recipient_id = self.convert_mongo_id(record.get('recipient_id'))
+                    sender_id = self.convert_mongo_id(record.get('sender_id'))
+                    
+                    # Validate foreign keys
+                    if recipient_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped notification: recipient_id {recipient_id} not found")
+                        continue
+                    
+                    if sender_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped notification: sender_id {sender_id} not found")
+                        continue
+                    
                     notification_data_obj = record.get('data', {})
                     
                     notification_data = {
                         'id': self.convert_mongo_id(record.get('_id')),
-                        'recipient_id': self.convert_mongo_id(record.get('recipient_id')),
-                        'sender_id': self.convert_mongo_id(record.get('sender_id')),
+                        'recipient_id': recipient_id,
+                        'sender_id': sender_id,
                         'type': record.get('type'),
                         'title': record.get('title'),
                         'message': record.get('message'),
