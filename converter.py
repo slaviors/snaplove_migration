@@ -37,6 +37,34 @@ class MongoToMySQLConverter:
             self.connection = pymysql.connect(**MYSQL_CONFIG)
             print(f"✓ Connected to MySQL database: {MYSQL_CONFIG['database']}")
             return True
+        except pymysql.err.OperationalError as e:
+            # Handle "Unknown database" error (1049)
+            if e.args[0] == 1049:
+                print(f"⚠ Database '{MYSQL_CONFIG['database']}' does not exist. Creating it...")
+                try:
+                    # Connect without specifying database
+                    temp_config = MYSQL_CONFIG.copy()
+                    db_name = temp_config.pop('database')
+                    temp_connection = pymysql.connect(**temp_config)
+                    cursor = temp_connection.cursor()
+                    
+                    # Create database
+                    cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                    print(f"✓ Database '{db_name}' created successfully")
+                    
+                    cursor.close()
+                    temp_connection.close()
+                    
+                    # Now connect to the newly created database
+                    self.connection = pymysql.connect(**MYSQL_CONFIG)
+                    print(f"✓ Connected to MySQL database: {MYSQL_CONFIG['database']}")
+                    return True
+                except Exception as create_error:
+                    print(f"✗ Failed to create database: {create_error}")
+                    return False
+            else:
+                print(f"✗ Failed to connect to MySQL: {e}")
+                return False
         except Exception as e:
             print(f"✗ Failed to connect to MySQL: {e}")
             return False

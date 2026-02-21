@@ -86,6 +86,10 @@ MYSQL_CONFIG = {
 **⚠️ PENTING:** 
 - File `config.py` sudah ada di `.gitignore` sehingga credentials Anda tidak akan ter-commit ke git
 - Pastikan MySQL user memiliki privilege: CREATE, INSERT, ALTER, DROP
+- **Database akan dibuat otomatis** jika belum ada. Atau buat manual dengan:
+  ```bash
+  mysql -u root -p < create_database.sql
+  ```
 
 ## Cara Menggunakan
 
