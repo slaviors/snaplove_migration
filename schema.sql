@@ -4,16 +4,26 @@
 
 -- Drop tables if they exist (in correct order to handle foreign keys)
 DROP TABLE IF EXISTS `notifications`;
+DROP TABLE IF EXISTS `broadcast_target_roles`;
 DROP TABLE IF EXISTS `broadcasts`;
 DROP TABLE IF EXISTS `aiphotobooth_usages`;
 DROP TABLE IF EXISTS `photo_collab_stickers`;
+DROP TABLE IF EXISTS `photo_collab_images`;
 DROP TABLE IF EXISTS `photo_collabs`;
+DROP TABLE IF EXISTS `photopost_comments`;
+DROP TABLE IF EXISTS `photopost_likes`;
+DROP TABLE IF EXISTS `photopost_images`;
+DROP TABLE IF EXISTS `photoposts`;
+DROP TABLE IF EXISTS `photo_videos`;
+DROP TABLE IF EXISTS `photo_images`;
 DROP TABLE IF EXISTS `photos`;
 DROP TABLE IF EXISTS `reports`;
+DROP TABLE IF EXISTS `ticket_images`;
 DROP TABLE IF EXISTS `tickets`;
 DROP TABLE IF EXISTS `frame_likes`;
 DROP TABLE IF EXISTS `frame_uses`;
 DROP TABLE IF EXISTS `frame_tags`;
+DROP TABLE IF EXISTS `frame_images`;
 DROP TABLE IF EXISTS `frames`;
 DROP TABLE IF EXISTS `follows`;
 DROP TABLE IF EXISTS `maintenances`;
@@ -234,6 +244,61 @@ CREATE TABLE `photo_videos` (
   `order_index` INT DEFAULT 0,
   FOREIGN KEY (`photo_id`) REFERENCES `photos`(`id`) ON DELETE CASCADE,
   INDEX idx_photo_id (`photo_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Photo Posts Table (Social Media Posts)
+CREATE TABLE `photoposts` (
+  `id` VARCHAR(24) PRIMARY KEY,
+  `title` VARCHAR(100),
+  `desc` VARCHAR(500) DEFAULT '',
+  `photo_id` VARCHAR(24),
+  `user_id` VARCHAR(24) NOT NULL,
+  `visibility` ENUM('public', 'followers', 'private') DEFAULT 'public',
+  `post_type` VARCHAR(50) DEFAULT 'normal',
+  `view_count` INT DEFAULT 0,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`photo_id`) REFERENCES `photos`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  INDEX idx_user_created (`user_id`, `created_at`),
+  INDEX idx_visibility (`visibility`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Photo Post Images
+CREATE TABLE `photopost_images` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `photopost_id` VARCHAR(24) NOT NULL,
+  `image_url` TEXT NOT NULL,
+  `order_index` INT DEFAULT 0,
+  FOREIGN KEY (`photopost_id`) REFERENCES `photoposts`(`id`) ON DELETE CASCADE,
+  INDEX idx_photopost_id (`photopost_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Photo Post Likes
+CREATE TABLE `photopost_likes` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `photopost_id` VARCHAR(24) NOT NULL,
+  `user_id` VARCHAR(24) NOT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`photopost_id`) REFERENCES `photoposts`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  UNIQUE KEY unique_photopost_like (`photopost_id`, `user_id`),
+  INDEX idx_photopost_id (`photopost_id`),
+  INDEX idx_user_id (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Photo Post Comments
+CREATE TABLE `photopost_comments` (
+  `id` VARCHAR(24) PRIMARY KEY,
+  `photopost_id` VARCHAR(24) NOT NULL,
+  `user_id` VARCHAR(24) NOT NULL,
+  `comment` TEXT NOT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`photopost_id`) REFERENCES `photoposts`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  INDEX idx_photopost_id (`photopost_id`),
+  INDEX idx_user_id (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Photo Collabs Table

@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 import pymysql
 from pymysql.cursors import DictCursor
+import bson
+from bson import decode_file_iter
 from config import MYSQL_CONFIG, DATA_DIR, SCHEMA_FILE, BATCH_SIZE, VERBOSE, DATA_FILES, MIGRATION_ORDER
 
 
@@ -73,8 +75,8 @@ class MongoToMySQLConverter:
             self.connection.rollback()
             return False
     
-    def load_json_file(self, filename: str) -> List[Dict]:
-        """Load JSON data from file"""
+    def load_data_file(self, filename: str) -> List[Dict]:
+        """Load data from JSON or BSON file"""
         filepath = os.path.join(DATA_DIR, filename)
         
         if not os.path.exists(filepath):
@@ -82,10 +84,21 @@ class MongoToMySQLConverter:
             return []
         
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            # Check file extension to determine format
+            if filename.endswith('.bson'):
+                # Load BSON file
+                data = []
+                with open(filepath, 'rb') as f:
+                    for doc in decode_file_iter(f):
+                        data.append(doc)
                 print(f"✓ Loaded {len(data)} records from {filename}")
                 return data
+            else:
+                # Load JSON file
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    print(f"✓ Loaded {len(data)} records from {filename}")
+                    return data
         except Exception as e:
             print(f"✗ Failed to load {filename}: {e}")
             return []
@@ -98,6 +111,17 @@ class MongoToMySQLConverter:
         if isinstance(mongo_id, dict) and '$oid' in mongo_id:
             return mongo_id['$oid']
         return str(mongo_id)
+    
+    @staticmethod
+    def convert_boolean(value: Any) -> bool:
+        """Convert various boolean representations to Python bool"""
+        if value is None:
+            return False
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes')
+        return bool(value)
     
     @staticmethod
     def convert_date(date_value: Any) -> Optional[str]:
@@ -144,7 +168,7 @@ class MongoToMySQLConverter:
                         'id': self.convert_mongo_id(record.get('_id')),
                         'image_profile': record.get('image_profile'),
                         'custom_profile_image': record.get('custom_profile_image'),
-                        'use_google_profile': record.get('use_google_profile', True),
+                        'use_google_profile': self.convert_boolean(record.get('use_google_profile', True)),
                         'name': record.get('name'),
                         'username': record.get('username'),
                         'email': record.get('email'),
@@ -152,13 +176,13 @@ class MongoToMySQLConverter:
                         'role': record.get('role', 'basic'),
                         'bio': record.get('bio', ''),
                         'birthdate': self.convert_date(record.get('birthdate')),
-                        'birthdate_changed': record.get('birthdate_changed', False),
+                        'birthdate_changed': self.convert_boolean(record.get('birthdate_changed', False)),
                         'birthdate_changed_at': self.convert_date(record.get('birthdate_changed_at')),
                         'last_birthday_notification': self.convert_date(record.get('last_birthday_notification')),
-                        'ban_status': record.get('ban_status', False),
+                        'ban_status': self.convert_boolean(record.get('ban_status', False)),
                         'ban_release_datetime': self.convert_date(record.get('ban_release_datetime')),
                         'google_id': record.get('google_id'),
-                        'email_verified': record.get('email_verified', False),
+                        'email_verified': self.convert_boolean(record.get('email_verified', False)),
                         'email_verification_token': record.get('email_verification_token'),
                         'email_verification_expires': self.convert_date(record.get('email_verification_expires')),
                         'email_verified_at': self.convert_date(record.get('email_verified_at')),
@@ -202,7 +226,7 @@ class MongoToMySQLConverter:
                 try:
                     maintenance_data = {
                         'id': self.convert_mongo_id(record.get('_id')),
-                        'is_active': record.get('isActive', False),
+                        'is_active': self.convert_boolean(record.get('isActive', False)),
                         'estimated_end_time': self.convert_date(record.get('estimatedEndTime')),
                         'message': record.get('message'),
                         'updated_by': self.convert_mongo_id(record.get('updatedBy')),
@@ -311,6 +335,11 @@ class MongoToMySQLConverter:
                             print(f"  ✗ Skipped frame {record.get('title')}: user_id {user_id} not found")
                         continue
                     
+                    # Validate approved_by foreign key (optional)
+                    approved_by = self.convert_mongo_id(record.get('approved_by'))
+                    if approved_by and approved_by not in self.inserted_user_ids:
+                        approved_by = None  # Set to NULL if user doesn't exist
+                    
                     # Insert main frame record
                     frame_data = {
                         'id': frame_id,
@@ -318,10 +347,10 @@ class MongoToMySQLConverter:
                         'desc': record.get('desc', ''),
                         'thumbnail': record.get('thumbnail'),
                         'layout_type': record.get('layout_type'),
-                        'official_status': record.get('official_status', False),
+                        'official_status': self.convert_boolean(record.get('official_status', False)),
                         'visibility': record.get('visibility', 'private'),
                         'approval_status': record.get('approval_status', 'pending'),
-                        'approved_by': self.convert_mongo_id(record.get('approved_by')),
+                        'approved_by': approved_by,
                         'approved_at': self.convert_date(record.get('approved_at')),
                         'rejection_reason': record.get('rejection_reason'),
                         'user_id': user_id,
@@ -402,16 +431,22 @@ class MongoToMySQLConverter:
             for record in data:
                 try:
                     ticket_id = self.convert_mongo_id(record.get('_id'))
+                    user_id = self.convert_mongo_id(record.get('user_id'))
+                    admin_id = self.convert_mongo_id(record.get('admin_id'))
+                    
+                    # Validate admin_id foreign key (optional)
+                    if admin_id and admin_id not in self.inserted_user_ids:
+                        admin_id = None  # Set to NULL if admin doesn't exist
                     
                     ticket_data = {
                         'id': ticket_id,
                         'title': record.get('title'),
                         'description': record.get('description'),
-                        'user_id': self.convert_mongo_id(record.get('user_id')),
+                        'user_id': user_id,
                         'type': record.get('type'),
                         'status': record.get('status', 'pending'),
                         'admin_response': record.get('admin_response'),
-                        'admin_id': self.convert_mongo_id(record.get('admin_id')),
+                        'admin_id': admin_id,
                         'priority': record.get('priority', 'medium'),
                         'created_at': self.convert_date(record.get('created_at')),
                         'updated_at': self.convert_date(record.get('updated_at')),
@@ -474,6 +509,11 @@ class MongoToMySQLConverter:
                             print(f"  ✗ Skipped report: user_id {user_id} not found")
                         continue
                     
+                    # Validate admin_id foreign key (optional)
+                    admin_id = self.convert_mongo_id(record.get('admin_id'))
+                    if admin_id and admin_id not in self.inserted_user_ids:
+                        admin_id = None
+                    
                     report_data = {
                         'id': self.convert_mongo_id(record.get('_id')),
                         'title': record.get('title'),
@@ -482,7 +522,7 @@ class MongoToMySQLConverter:
                         'user_id': user_id,
                         'report_status': record.get('report_status', 'pending'),
                         'admin_response': record.get('admin_response'),
-                        'admin_id': self.convert_mongo_id(record.get('admin_id')),
+                        'admin_id': admin_id,
                         'created_at': self.convert_date(record.get('created_at')),
                         'updated_at': self.convert_date(record.get('updated_at')),
                     }
@@ -544,8 +584,8 @@ class MongoToMySQLConverter:
                         'frame_id': frame_id,
                         'user_id': user_id,
                         'expires_at': self.convert_date(record.get('expires_at')),
-                        'live_photo': record.get('livePhoto', False),
-                        'ai_photo': record.get('aiPhoto', False),
+                        'live_photo': self.convert_boolean(record.get('livePhoto', False)),
+                        'ai_photo': self.convert_boolean(record.get('aiPhoto', False)),
                         'created_at': self.convert_date(record.get('created_at')),
                         'updated_at': self.convert_date(record.get('updated_at')),
                     }
@@ -585,6 +625,106 @@ class MongoToMySQLConverter:
             
         except Exception as e:
             print(f"✗ Photos migration failed: {e}")
+            self.connection.rollback()
+            return False
+    
+    def migrate_photoposts(self, data: List[Dict]) -> bool:
+        """Migrate photo posts collection"""
+        if not data:
+            return True
+        
+        cursor = self.connection.cursor()
+        successful = 0
+        failed = 0
+        
+        try:
+            for record in data:
+                try:
+                    photopost_id = self.convert_mongo_id(record.get('_id'))
+                    photo_id = self.convert_mongo_id(record.get('photo_id'))
+                    user_id = self.convert_mongo_id(record.get('user_id'))
+                    
+                    # Validate user_id foreign key
+                    if user_id not in self.inserted_user_ids:
+                        failed += 1
+                        if VERBOSE:
+                            print(f"  ✗ Skipped photopost: user_id {user_id} not found")
+                        continue
+                    
+                    # photo_id is optional and can be NULL
+                    if photo_id and photo_id not in self.inserted_photo_ids:
+                        photo_id = None  # Set to NULL if referenced photo doesn't exist
+                    
+                    photopost_data = {
+                        'id': photopost_id,
+                        'title': record.get('title'),
+                        'desc': record.get('desc', ''),
+                        'photo_id': photo_id,
+                        'user_id': user_id,
+                        'visibility': record.get('visibility', 'public'),
+                        'post_type': record.get('post_type', 'normal'),
+                        'view_count': record.get('view_count', 0),
+                        'created_at': self.convert_date(record.get('created_at')),
+                        'updated_at': self.convert_date(record.get('updated_at')),
+                    }
+                    
+                    placeholders = ', '.join(['%s'] * len(photopost_data))
+                    columns = ', '.join(f'`{k}`' for k in photopost_data.keys())
+                    sql = f"INSERT INTO photoposts ({columns}) VALUES ({placeholders})"
+                    cursor.execute(sql, list(photopost_data.values()))
+                    
+                    # Insert photo post images
+                    images = record.get('images', [])
+                    for idx, image_url in enumerate(images):
+                        cursor.execute(
+                            "INSERT INTO photopost_images (photopost_id, image_url, order_index) VALUES (%s, %s, %s)",
+                            (photopost_id, image_url, idx)
+                        )
+                    
+                    # Insert photo post likes (only if user exists)
+                    likes = record.get('likes', [])
+                    for like in likes:
+                        like_user_id = self.convert_mongo_id(like.get('user_id') if isinstance(like, dict) else like)
+                        if like_user_id and like_user_id in self.inserted_user_ids:
+                            like_created = self.convert_date(like.get('created_at')) if isinstance(like, dict) else None
+                            cursor.execute(
+                                "INSERT INTO photopost_likes (photopost_id, user_id, created_at) VALUES (%s, %s, %s)",
+                                (photopost_id, like_user_id, like_created)
+                            )
+                    
+                    # Insert photo post comments (only if user exists)
+                    comments = record.get('comments', [])
+                    for comment in comments:
+                        comment_user_id = self.convert_mongo_id(comment.get('user_id'))
+                        if comment_user_id and comment_user_id in self.inserted_user_ids:
+                            comment_id = self.convert_mongo_id(comment.get('_id'))
+                            cursor.execute(
+                                """INSERT INTO photopost_comments 
+                                (id, photopost_id, user_id, comment, created_at, updated_at) 
+                                VALUES (%s, %s, %s, %s, %s, %s)""",
+                                (
+                                    comment_id,
+                                    photopost_id,
+                                    comment_user_id,
+                                    comment.get('comment', ''),
+                                    self.convert_date(comment.get('created_at')),
+                                    self.convert_date(comment.get('updated_at'))
+                                )
+                            )
+                    
+                    successful += 1
+                    
+                except Exception as e:
+                    failed += 1
+                    if VERBOSE:
+                        print(f"  ✗ Failed to insert photopost: {e}")
+            
+            self.connection.commit()
+            print(f"✓ Photo Posts: {successful} successful, {failed} failed")
+            return True
+            
+        except Exception as e:
+            print(f"✗ Photo Posts migration failed: {e}")
             self.connection.rollback()
             return False
     
@@ -771,9 +911,9 @@ class MongoToMySQLConverter:
                         'delivery_online': delivery_stats.get('online_delivery', 0),
                         'delivery_offline': delivery_stats.get('offline_delivery', 0),
                         'delivery_failed': delivery_stats.get('failed_delivery', 0),
-                        'send_to_new_users': settings.get('send_to_new_users', False),
-                        'persistent': settings.get('persistent', True),
-                        'dismissible': settings.get('dismissible', True),
+                        'send_to_new_users': self.convert_boolean(settings.get('send_to_new_users', False)),
+                        'persistent': self.convert_boolean(settings.get('persistent', True)),
+                        'dismissible': self.convert_boolean(settings.get('dismissible', True)),
                         'action_url': settings.get('action_url'),
                         'icon': settings.get('icon'),
                         'color': settings.get('color'),
@@ -851,9 +991,9 @@ class MongoToMySQLConverter:
                         'type': record.get('type'),
                         'title': record.get('title'),
                         'message': record.get('message'),
-                        'is_read': record.get('is_read', False),
+                        'is_read': self.convert_boolean(record.get('is_read', False)),
                         'read_at': self.convert_date(record.get('read_at')),
-                        'is_dismissible': record.get('is_dismissible', True),
+                        'is_dismissible': self.convert_boolean(record.get('is_dismissible', True)),
                         'expires_at': self.convert_date(record.get('expires_at')),
                         'data_frame_id': self.convert_mongo_id(notification_data_obj.get('frame_id')),
                         'data_frame_title': notification_data_obj.get('frame_title'),
@@ -929,6 +1069,7 @@ class MongoToMySQLConverter:
                 'tickets': self.migrate_tickets,
                 'reports': self.migrate_reports,
                 'photos': self.migrate_photos,
+                'photoposts': self.migrate_photoposts,
                 'photocollabs': self.migrate_photocollabs,
                 'aiphotobooth_usages': self.migrate_aiphotobooth_usages,
                 'broadcasts': self.migrate_broadcasts,
@@ -943,7 +1084,7 @@ class MongoToMySQLConverter:
                     print(f"⚠ No file mapping found for {collection}, skipping...")
                     continue
                 
-                data = self.load_json_file(filename)
+                data = self.load_data_file(filename)
                 
                 if collection in migration_methods:
                     migration_methods[collection](data)
