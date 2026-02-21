@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 import pymysql
 from pymysql.cursors import DictCursor
-from bson import decode_all
+import bson
 from config import MYSQL_CONFIG, DATA_DIR, SCHEMA_FILE, BATCH_SIZE, VERBOSE, DATA_FILES, MIGRATION_ORDER
 
 
@@ -85,11 +85,28 @@ class MongoToMySQLConverter:
         try:
             # Check file extension to determine format
             if filename.endswith('.bson'):
-                # Load BSON file
+                # Load BSON file (mongodump format - concatenated BSON documents)
+                data = []
                 with open(filepath, 'rb') as f:
-                    bson_data = f.read()
-                    # Decode all BSON documents at once
-                    data = decode_all(bson_data)
+                    raw_data = f.read()
+                    # Parse concatenated BSON documents
+                    offset = 0
+                    while offset < len(raw_data):
+                        # Each BSON document starts with 4-byte size (little-endian)
+                        if offset + 4 > len(raw_data):
+                            break
+                        doc_size = int.from_bytes(raw_data[offset:offset+4], 'little')
+                        if offset + doc_size > len(raw_data):
+                            break
+                        # Decode single BSON document
+                        doc_bytes = raw_data[offset:offset+doc_size]
+                        try:
+                            doc = bson.BSON(doc_bytes).decode()
+                            data.append(doc)
+                        except Exception as e:
+                            if VERBOSE:
+                                print(f"  ⚠ Failed to decode BSON document at offset {offset}: {e}")
+                        offset += doc_size
                 print(f"✓ Loaded {len(data)} records from {filename}")
                 return data
             else:
