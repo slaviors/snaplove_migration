@@ -89,26 +89,45 @@ class MongoToMySQLConverter:
                 data = []
                 with open(filepath, 'rb') as f:
                     raw_data = f.read()
-                    # Parse concatenated BSON documents
-                    offset = 0
-                    while offset < len(raw_data):
-                        # Each BSON document starts with 4-byte size (little-endian)
-                        if offset + 4 > len(raw_data):
-                            break
-                        doc_size = int.from_bytes(raw_data[offset:offset+4], 'little')
-                        if offset + doc_size > len(raw_data):
-                            break
-                        # Decode single BSON document
-                        doc_bytes = raw_data[offset:offset+doc_size]
-                        try:
-                            doc = bson.decode(doc_bytes)
-                            data.append(doc)
-                        except Exception as e:
-                            if VERBOSE:
-                                print(f"  ⚠ Failed to decode BSON document at offset {offset}: {e}")
-                        offset += doc_size
-                print(f"✓ Loaded {len(data)} records from {filename}")
-                return data
+                    
+                    # Try to decode all documents at once using decode_all
+                    try:
+                        # Method 1: Use decode_all (pymongo 4.x)
+                        from bson import decode_all
+                        data = decode_all(raw_data)
+                        print(f"✓ Loaded {len(data)} records from {filename}")
+                        return data
+                    except (ImportError, AttributeError):
+                        # Method 2: Parse concatenated BSON documents manually
+                        offset = 0
+                        while offset < len(raw_data):
+                            # Each BSON document starts with 4-byte size (little-endian)
+                            if offset + 4 > len(raw_data):
+                                break
+                            doc_size = int.from_bytes(raw_data[offset:offset+4], 'little')
+                            if offset + doc_size > len(raw_data):
+                                break
+                            # Decode single BSON document
+                            doc_bytes = raw_data[offset:offset+doc_size]
+                            try:
+                                # Try different decode methods
+                                if hasattr(bson, 'BSON'):
+                                    doc = bson.BSON(doc_bytes).decode()
+                                elif hasattr(bson, 'decode'):
+                                    doc = bson.decode(doc_bytes)
+                                else:
+                                    # Use codec directly
+                                    from bson.codec_options import CodecOptions
+                                    import bson as bson_module
+                                    codec_opts = CodecOptions()
+                                    doc = bson_module._bson_to_dict(doc_bytes, codec_opts)[0]
+                                data.append(doc)
+                            except Exception as e:
+                                if VERBOSE:
+                                    print(f"  ⚠ Failed to decode BSON document at offset {offset}: {e}")
+                            offset += doc_size
+                        print(f"✓ Loaded {len(data)} records from {filename}")
+                        return data
             else:
                 # Load JSON file
                 with open(filepath, 'r', encoding='utf-8') as f:
