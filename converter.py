@@ -101,7 +101,7 @@ class MongoToMySQLConverter:
                         # Decode single BSON document
                         doc_bytes = raw_data[offset:offset+doc_size]
                         try:
-                            doc = bson.BSON(doc_bytes).decode()
+                            doc = bson.decode(doc_bytes)
                             data.append(doc)
                         except Exception as e:
                             if VERBOSE:
