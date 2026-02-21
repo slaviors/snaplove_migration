@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional
 import pymysql
 from pymysql.cursors import DictCursor
 import bson
-from bson import decode_file_iter
+from bson import decode_iter
 from config import MYSQL_CONFIG, DATA_DIR, SCHEMA_FILE, BATCH_SIZE, VERBOSE, DATA_FILES, MIGRATION_ORDER
 
 
@@ -89,7 +89,8 @@ class MongoToMySQLConverter:
                 # Load BSON file
                 data = []
                 with open(filepath, 'rb') as f:
-                    for doc in decode_file_iter(f):
+                    # Read all bytes and decode BSON documents
+                    for doc in decode_iter(f.read()):
                         data.append(doc)
                 print(f"✓ Loaded {len(data)} records from {filename}")
                 return data
